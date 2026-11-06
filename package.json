@@ -1,7 +1,7 @@
 {
-  "name": "cs-task-list",
-  "productName": "CS Task List",
-  "version": "1.0.0",
+  "name": "task-timer",
+  "productName": "Task Timer",
+  "version": "1.1.0",
   "description": "Task list with deadlines and countdown timers for crew scheduling.",
   "main": "main.js",
   "author": "Kyle Tam",
@@ -13,8 +13,8 @@
     "build": "electron-builder --win portable --publish never"
   },
   "build": {
-    "appId": "com.kylejtam.cstasklist",
-    "productName": "CS Task List",
+    "appId": "com.kylejtam.tasktimer",
+    "productName": "Task Timer",
     "files": [
       "main.js",
       "preload.js",
@@ -35,7 +35,7 @@
       "icon": "build/icon.png"
     },
     "portable": {
-      "artifactName": "CS-Task-List.exe"
+      "artifactName": "Task-Timer.exe"
     }
   },
   "devDependencies": {

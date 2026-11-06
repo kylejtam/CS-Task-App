@@ -1,4 +1,4 @@
-# Builds the Windows app (CS-Task-List.exe) on GitHub's own Windows computer
+# Builds the Windows app (Task-Timer.exe) on GitHub's own Windows computer
 # every time changes are pushed. The finished .exe appears on the
 # repository's "Releases" page, under "Latest build".
 name: Build Windows app
@@ -39,8 +39,8 @@ jobs:
       - name: Keep a copy with this run
         uses: actions/upload-artifact@v4
         with:
-          name: CS-Task-List
-          path: dist/CS-Task-List.exe
+          name: Task-Timer
+          path: dist/Task-Timer.exe
 
       - name: Publish to the Releases page
         shell: bash
@@ -48,7 +48,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --cleanup-tag --yes || true
-          gh release create latest dist/CS-Task-List.exe \
+          gh release create latest dist/Task-Timer.exe \
             --target "${{ github.sha }}" \
             --title "Latest build" \
-            --notes "Built from branch ${{ github.ref_name }}, commit ${{ github.sha }}. Download CS-Task-List.exe below and double-click it to run."
+            --notes "Built from branch ${{ github.ref_name }}, commit ${{ github.sha }}. Download Task-Timer.exe below and double-click it to run."

@@ -6,7 +6,7 @@ const { app, BrowserWindow, ipcMain, Notification, Menu, nativeTheme, screen } =
 const path = require('path');
 const fs = require('fs');
 
-app.setAppUserModelId('com.kylejtam.cstasklist');
+app.setAppUserModelId('com.kylejtam.tasktimer');
 
 // Only allow one copy of the app to run at a time.
 if (!app.requestSingleInstanceLock()) {
@@ -37,7 +37,24 @@ if (!app.requestSingleInstanceLock()) {
       b.y < w.y + w.height - 50 && b.y + b.height > w.y);
   }
 
+  // The app used to be called "CS Task List". If tasks were saved under the old name,
+  // copy them over the first time "Task Timer" starts so nothing is lost.
+  function migrateOldData() {
+    const oldDir = path.join(app.getPath('appData'), 'CS Task List');
+    for (const name of ['tasks.json', 'window.json']) {
+      const from = path.join(oldDir, name);
+      const to = path.join(app.getPath('userData'), name);
+      try {
+        if (!fs.existsSync(to) && fs.existsSync(from)) {
+          fs.mkdirSync(path.dirname(to), { recursive: true });
+          fs.copyFileSync(from, to);
+        }
+      } catch (err) { console.error('Could not copy old data', err); }
+    }
+  }
+
   function createWindow() {
+    migrateOldData();
     const saved = readJson(windowFile());
     const data = readJson(dataFile());
     const settings = (data && data.settings) || {};
@@ -49,7 +66,7 @@ if (!app.requestSingleInstanceLock()) {
       ...bounds,
       minWidth: 300,
       minHeight: 420,
-      title: 'CS Task List',
+      title: 'Task Timer',
       backgroundColor: '#16181d',
       alwaysOnTop: !!settings.alwaysOnTop,
       autoHideMenuBar: true,

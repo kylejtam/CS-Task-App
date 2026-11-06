@@ -11,13 +11,30 @@ const bridge = window.api || {
   saveNow(d) { this.save(d); },
   setAlwaysOnTop() {},
   setTheme() {},
-  notify(title, body) {
-    try { if (window.Notification && Notification.permission === 'granted') new Notification(title, { body }); } catch {}
+  async notify(title, body) {
+    try {
+      if (!window.Notification || Notification.permission !== 'granted') return;
+      const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+      if (reg) reg.showNotification(title, { body, icon: 'icons/icon-192.png', tag: 'overdue' });
+      else new Notification(title, { body });
+    } catch {}
   },
 };
+const isDesktopApp = !!window.api;
+const isTouch = window.matchMedia('(pointer: coarse)').matches;
+if (isTouch) document.documentElement.classList.add('touch');
+
+// Phone/web version: ask the phone for permission to show pop-ups.
+async function askNotificationPermission() {
+  if (isDesktopApp) return true;
+  if (!window.Notification) return false;
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission === 'denied') return false;
+  try { return (await Notification.requestPermission()) === 'granted'; } catch { return false; }
+}
 
 const DEFAULT_SETTINGS = {
-  listName: 'CS Task List',
+  listName: 'Task Timer',
   yellowMinutes: 60,
   orangeMinutes: 5,
   theme: 'dark',
@@ -39,6 +56,8 @@ const state = (() => {
     ui: { completedOpen: false, ...(d.ui || {}) },
   };
 })();
+// The app's old default name was "CS Task List"; switch anyone still using it to the new name.
+if (state.settings.listName === 'CS Task List') state.settings.listName = DEFAULT_SETTINGS.listName;
 const undoStack = [];
 
 let saveTimer = null;
@@ -49,7 +68,10 @@ function save() {
 function snapshotState() {
   return { version: 1, tasks: state.tasks, presets: state.presets, settings: state.settings, ui: state.ui };
 }
-window.addEventListener('beforeunload', () => { clearTimeout(saveTimer); bridge.saveNow(snapshotState()); });
+function saveNow() { clearTimeout(saveTimer); bridge.saveNow(snapshotState()); }
+window.addEventListener('beforeunload', saveNow);
+window.addEventListener('pagehide', saveNow);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -102,6 +124,7 @@ function rowEl(t, section) {
     flag);
 
   if (section === 'a') {
+    attachSwipe(row, { right: ['Complete', () => completeTask(t.id)], left: ['Change time', () => openChangeDueTime(t.id)] });
     row.addEventListener('click', () => acknowledge(t.id));
     row.addEventListener('dblclick', () => completeTask(t.id));
     row.addEventListener('contextmenu', (e) => { e.preventDefault(); openChangeDueTime(t.id); });
@@ -113,8 +136,62 @@ function rowEl(t, section) {
     row.querySelector('.countdown').textContent = t.due == null ? '—' : clock(t.due);
     row.title = 'Right-click to move back to the active list';
     row.addEventListener('contextmenu', (e) => { e.preventDefault(); restoreTask(t.id); });
+    const back = ['Move back', () => restoreTask(t.id)];
+    attachSwipe(row, { right: back, left: back });
   }
   return row;
+}
+
+// Swipe a row sideways with a finger. Past about a third of its width, the action happens.
+function attachSwipe(row, actions) {
+  let startX = 0, startY = 0, dx = 0, phase = 'idle', hint = null;
+  const reset = () => {
+    row.style.transition = 'transform .2s ease-out';
+    row.style.transform = '';
+    if (hint) { const h = hint; hint = null; h.style.opacity = '0'; setTimeout(() => h.remove(), 200); }
+    setTimeout(() => { row.style.transition = ''; }, 220);
+  };
+  row.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || openDialogs) { phase = 'idle'; return; }
+    startX = e.touches[0].clientX; startY = e.touches[0].clientY; dx = 0; phase = 'maybe';
+  }, { passive: true });
+  row.addEventListener('touchmove', (e) => {
+    if (phase === 'idle' || phase === 'scroll') return;
+    const x = e.touches[0].clientX - startX, y = e.touches[0].clientY - startY;
+    if (phase === 'maybe') {
+      if (Math.abs(x) < 10 && Math.abs(y) < 10) return;
+      if (Math.abs(y) > Math.abs(x)) { phase = 'scroll'; return; }
+      phase = 'swipe';
+      row.style.transition = 'none';
+      hint = el('div', { class: 'swipe-hint' });
+      listEl.append(hint);
+      hint.style.top = row.offsetTop + 'px';
+      hint.style.height = row.offsetHeight + 'px';
+    }
+    e.preventDefault();
+    dx = x;
+    const action = dx > 0 ? actions.right : actions.left;
+    row.style.transform = `translateX(${dx}px)`;
+    const ready = Math.abs(dx) > row.offsetWidth * 0.33;
+    hint.textContent = action ? action[0] : '';
+    hint.className = 'swipe-hint ' + (dx > 0 ? 'to-right' : 'to-left') + (ready ? ' ready' : '');
+  }, { passive: false });
+  const end = () => {
+    if (phase !== 'swipe') { phase = 'idle'; return; }
+    phase = 'idle';
+    const action = dx > 0 ? actions.right : actions.left;
+    const ready = Math.abs(dx) > row.offsetWidth * 0.33;
+    if (ready && action && dx > 0 && action[0] !== 'Move back') {
+      // Completing: let the row carry on off the screen.
+      if (hint) { hint.remove(); hint = null; }
+      action[1]();
+    } else {
+      reset();
+      if (ready && action) action[1]();
+    }
+  };
+  row.addEventListener('touchend', end);
+  row.addEventListener('touchcancel', () => { phase = 'swipe'; dx = 0; end(); });
 }
 
 function render() {
@@ -224,7 +301,7 @@ function playAlertSound() {
 }
 
 // ---------- Animations ----------
-const allRows = () => [...activeEl.children, ...completedListEl.children];
+const allRows = () => [...activeEl.querySelectorAll(':scope > .row'), ...completedListEl.querySelectorAll(':scope > .row')];
 function isVisible(row) {
   return row.parentElement === activeEl || state.ui.completedOpen;
 }
@@ -249,11 +326,13 @@ function transition(mutate, opts = {}) {
 }
 async function runTransition(mutate, opts) {
   const before = new Set(allRows().map((r) => r.dataset.key));
+  const snapshot = clone(state.tasks);
+  mutate();
+  if (JSON.stringify(state.tasks) === JSON.stringify(snapshot)) { render(); return; } // nothing changed
   if (opts.undoable !== false) {
-    undoStack.push(clone(state.tasks));
+    undoStack.push(snapshot);
     if (undoStack.length > MAX_UNDO) undoStack.shift();
   }
-  mutate();
   save();
   const after = expectedKeys();
   const removed = allRows().filter((r) => !after.has(r.dataset.key) && isVisible(r));
@@ -262,7 +341,7 @@ async function runTransition(mutate, opts) {
   // 1. Rows that are leaving slide to the right and fade out.
   if (removed.length && !reducedMotion) {
     await Promise.all(removed.map((r) => wait(r.animate(
-      [{ transform: 'translateX(0)', opacity: 1 }, { transform: 'translateX(105%)', opacity: 0 }],
+      [{ transform: 'translateX(105%)', opacity: 0 }],
       { duration: 260, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' }))));
   }
 
@@ -324,7 +403,7 @@ function addTask(text, due, ghost) {
   }, { ghost: ghost ? { ...ghost, id } : null });
 }
 function completeTask(id) {
-  return transition(() => { const t = findTask(id); if (t) { t.completed = true; t.completedAt = Date.now(); } });
+  return transition(() => { const t = findTask(id); if (t && !t.completed) { t.completed = true; t.completedAt = Date.now(); } });
 }
 function restoreTask(id) {
   return transition(() => { const t = findTask(id); if (t) { t.completed = false; delete t.completedAt; } }, { enter: 'right' });
@@ -443,7 +522,7 @@ function describeDue(due, now) {
 
 // After pressing Enter in the bottom box: ask for the due time.
 function openAddDialog(text) {
-  const field = el('input', { class: 'field', type: 'text', placeholder: '14:30 or +45', autocomplete: 'off' });
+  const field = el('input', { class: 'field', type: 'text', placeholder: '14:30 or +45', autocomplete: 'off', autocorrect: 'off', autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'done' });
   const preview = el('p', { class: 'preview' });
   const addBtn = el('button', { class: 'btn primary', text: 'Add (no time limit)' });
   const cancelBtn = el('button', { class: 'btn', text: 'Cancel' });
@@ -490,7 +569,7 @@ function openChangeDueTime(id) {
   const t = findTask(id);
   if (!t) return;
   let value = t.due; // the due time being edited
-  const field = el('input', { class: 'field', type: 'text', placeholder: 'No time limit', autocomplete: 'off' });
+  const field = el('input', { class: 'field', type: 'text', placeholder: 'No time limit', autocomplete: 'off', autocorrect: 'off', autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'done' });
   field.value = t.due == null ? '' : clock(t.due);
   const preview = el('p', { class: 'preview' });
   const steps = el('div', { class: 'steps' });
@@ -599,6 +678,17 @@ function openSettings() {
   nameField.addEventListener('blur', () => {
     if (!nameField.value.trim()) { nameField.value = DEFAULT_SETTINGS.listName; setSetting('listName', DEFAULT_SETTINGS.listName); }
   });
+  const popupToggle = toggle('popup', isDesktopApp ? 'Show a Windows pop-up' : 'Show a pop-up notification', el('button', {
+    class: 'btn small', text: 'Test',
+    onclick: async () => {
+      if (await askNotificationPermission()) bridge.notify('Task overdue', 'This is what an overdue alert looks like.');
+      else toast('Pop-ups are not allowed on this device');
+    },
+  }));
+  const popupBox = popupToggle.querySelector('input');
+  popupBox.addEventListener('change', async () => {
+    if (popupBox.checked && !(await askNotificationPermission())) toast('Pop-ups are not allowed on this device');
+  });
   const yellowField = numberField('yellowMinutes');
   const orangeField = numberField('orangeMinutes');
   const presetList = el('div');
@@ -626,14 +716,12 @@ function openSettings() {
 
       el('h3', { text: 'Appearance' }),
       el('div', { class: 'setting' }, el('label', { text: 'Theme' }), themeSeg),
-      toggle('alwaysOnTop', 'Keep window on top of other windows'),
+      isDesktopApp ? toggle('alwaysOnTop', 'Keep window on top of other windows') : null,
 
       el('h3', { text: 'Overdue alerts' }),
       toggle('sound', 'Play a sound', el('button', { class: 'btn small', text: 'Test', onclick: playAlertSound })),
-      toggle('popup', 'Show a Windows pop-up', el('button', {
-        class: 'btn small', text: 'Test',
-        onclick: () => bridge.notify('Task overdue', 'This is what an overdue alert looks like.'),
-      })),
+      popupToggle,
+      isDesktopApp ? null : el('p', { class: 'muted', text: 'On iPhone, pop-ups and sounds only happen while the app is open on screen. Pop-ups need iOS 16.4 or newer and the app added to your Home Screen.' }),
 
       el('h3', { text: 'Presets' }),
       presetList,
@@ -764,7 +852,7 @@ function toast(msg) {
 
 // ---------- Wiring up ----------
 input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
+  if (e.key === 'Enter' && !e.isComposing) {
     const text = input.value.trim();
     if (text) { e.preventDefault(); openAddDialog(text); }
   }
@@ -783,10 +871,28 @@ document.addEventListener('keydown', (e) => {
 // Stop double-clicks from selecting text.
 listEl.addEventListener('mousedown', (e) => { if (e.detail > 1) e.preventDefault(); });
 
+if (isTouch) input.placeholder = 'Type a task and tap Return';
+$('empty').innerHTML = isTouch
+  ? 'No tasks yet.<br>Type one below and tap Return.<br><span class="muted">Swipe right to complete · swipe left to change the time</span>'
+  : 'No tasks yet.<br>Type one below and press Enter.<br><span class="muted">Double-click to complete · right-click to change the time</span>';
 applySettings();
 render();
 setCompletedOpen(!!state.ui.completedOpen, false);
 input.focus();
+
+// iPhones only allow sound after the screen has been touched once.
+document.addEventListener('touchend', () => {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch {}
+}, { once: true, passive: true });
+
+// Web/iPhone version: lets the app open without internet, and keeps saved tasks from being cleared.
+if (!isDesktopApp && 'serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+}
 
 // Tick exactly on each new second so all countdowns change together.
 (function tick() {

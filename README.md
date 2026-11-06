@@ -1,4 +1,4 @@
-# CS Task List
+# Task Timer
 
 A small Windows app for tracking crew scheduling tasks with deadlines and countdown timers.
 It's a single `.exe` file. There's nothing to install: put it anywhere and double-click it.
@@ -6,7 +6,7 @@ It's a single `.exe` file. There's nothing to install: put it anywhere and doubl
 ## Getting the app
 
 1. Open this repository on GitHub and click **Releases** on the right-hand side.
-2. Open **Latest build** and click **CS-Task-List.exe** to download it.
+2. Open **Latest build** and click **Task-Timer.exe** to download it.
 3. Put the file wherever you like (Desktop, Documents, a USB stick) and double-click it.
 
 The first time you run it, Windows may show a blue box saying **"Windows protected your PC"**.
@@ -15,7 +15,21 @@ Click **More info**, then **Run anyway**. You only need to do this once.
 
 The app can take a few seconds to open, because it unpacks itself each time it starts.
 
-## How to use it
+## iPhone version
+
+The same app also runs on iPhone as a **Home Screen web app**: open its web address in **Safari**,
+tap the **Share** button (square with an arrow), then **Add to Home Screen**. It then has its own
+icon, opens full-screen, works without internet, and keeps your tasks on your phone.
+
+* Swipe a task **right** to complete it. Swipe it **left** to change its due time.
+* Tap a flashing task **once** to stop the flashing.
+* Swipe a completed task either way to move it back to the list.
+* Timers, sounds and pop-ups only work while the app is open on screen. iPhones pause web apps in the
+  background, so an alert for a task that went overdue while the app was closed appears when you next open it.
+* Pop-up alerts need iOS 16.4 or newer. Sounds don't play when the phone is on silent.
+* Phone tasks and Windows tasks are separate lists: they don't sync with each other.
+
+## How to use it (Windows)
 
 | To do this | Do this |
 | --- | --- |
@@ -43,7 +57,7 @@ as a negative number (`-12:00`).
 **Alerts:** when a task becomes overdue, the app plays a sound and shows a Windows pop-up.
 Both can be turned off in Settings.
 
-**Where your tasks are saved:** `%APPDATA%\CS Task List\tasks.json`. They stay saved even if you
+**Where your tasks are saved:** `%APPDATA%\Task Timer\tasks.json` (tasks saved by the older "CS Task List" version are copied over automatically). They stay saved even if you
 move or replace the `.exe`.
 
 ## For whoever maintains this
