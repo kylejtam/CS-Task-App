@@ -1,0 +1,54 @@
+# Builds the Windows app (CS-Task-List.exe) on GitHub's own Windows computer
+# every time changes are pushed. The finished .exe appears on the
+# repository's "Releases" page, under "Latest build".
+name: Build Windows app
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install tools
+        run: npm ci
+
+      - name: Run checks
+        run: npm test
+
+      - name: Build the .exe
+        run: npm run build
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Keep a copy with this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: CS-Task-List
+          path: dist/CS-Task-List.exe
+
+      - name: Publish to the Releases page
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest dist/CS-Task-List.exe \
+            --target "${{ github.sha }}" \
+            --title "Latest build" \
+            --notes "Built from branch ${{ github.ref_name }}, commit ${{ github.sha }}. Download CS-Task-List.exe below and double-click it to run."

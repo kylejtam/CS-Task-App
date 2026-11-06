@@ -1,0 +1,45 @@
+{
+  "name": "cs-task-list",
+  "productName": "CS Task List",
+  "version": "1.0.0",
+  "description": "Task list with deadlines and countdown timers for crew scheduling.",
+  "main": "main.js",
+  "author": "Kyle Tam",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "build": "electron-builder --win portable --publish never"
+  },
+  "build": {
+    "appId": "com.kylejtam.cstasklist",
+    "productName": "CS Task List",
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "portable": {
+      "artifactName": "CS-Task-List.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  }
+}
