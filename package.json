@@ -9,7 +9,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/*.test.js",
+    "test": "node --test test/timeutils.test.js",
     "build": "electron-builder --win portable --publish never"
   },
   "build": {

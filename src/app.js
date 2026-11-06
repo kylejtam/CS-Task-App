@@ -17,6 +17,7 @@ const bridge = window.api || {
 };
 
 const DEFAULT_SETTINGS = {
+  listName: 'CS Task List',
   yellowMinutes: 60,
   orangeMinutes: 5,
   theme: 'dark',
@@ -96,11 +97,12 @@ function rowEl(t, section) {
     text: '!',
   });
   const row = el('div', { class: 'row', 'data-key': section + ':' + t.id, 'data-id': t.id },
-    el('div', { class: 'countdown' }),
+    el('div', { class: 'when' }, el('div', { class: 'countdown' }), el('div', { class: 'due' })),
     el('div', { class: 'name', text: t.text }),
     flag);
 
   if (section === 'a') {
+    row.addEventListener('click', () => acknowledge(t.id));
     row.addEventListener('dblclick', () => completeTask(t.id));
     row.addEventListener('contextmenu', (e) => { e.preventDefault(); openChangeDueTime(t.id); });
     flag.addEventListener('click', (e) => { e.stopPropagation(); toggleFlag(t.id); });
@@ -132,28 +134,56 @@ function updateUndoButton() {
   undoBtn.title = undoStack.length ? `Undo (${undoStack.length} available)` : 'Nothing to undo';
 }
 
+// Which color a deadline is at right now: '', 'yellow', 'orange' or 'red'.
+function levelAt(due, now) {
+  if (due == null) return '';
+  const left = due - now;
+  if (left <= 0) return 'red';
+  if (left <= state.settings.orangeMinutes * MIN) return 'orange';
+  if (left <= state.settings.yellowMinutes * MIN) return 'yellow';
+  return '';
+}
+// A single click on a flashing task means "I've seen it": the flashing stops.
+function acknowledge(id) {
+  const t = findTask(id);
+  if (!t) return;
+  const level = levelAt(t.due, Date.now());
+  if (!level || t.ack === level) return;
+  t.ack = level;
+  save();
+  updateTimes();
+}
+function dueLabel(due, now) {
+  const day = dayLabel(due, now);
+  if (day === 'today') return clock(due);
+  if (day === 'tomorrow') return clock(due) + ' tmrw';
+  if (day === 'yesterday') return clock(due) + ' yday';
+  return clock(due) + ' ' + new Date(due).toLocaleDateString(undefined, { weekday: 'short' });
+}
+
 // Runs every second: updates countdowns and row colors.
 function updateTimes() {
   const now = Date.now();
-  const yellow = state.settings.yellowMinutes * MIN;
-  const orange = state.settings.orangeMinutes * MIN;
   for (const row of activeEl.children) {
     const t = findTask(row.dataset.id);
     if (!t) continue;
-    const cd = row.firstChild;
-    let st = '';
+    const cd = row.querySelector('.countdown');
+    const dueEl = row.querySelector('.due');
+    const level = levelAt(t.due, now);
+    const st = level ? 'st-' + level : '';
+    const flashing = !!level && t.ack !== level;
     if (t.due == null) {
       cd.textContent = '—';
+      dueEl.textContent = '';
       row.title = 'No time limit · Double-click to complete · Right-click to change due time';
     } else {
-      const left = t.due - now;
-      cd.textContent = formatCountdown(left);
-      if (left <= 0) st = 'st-red';
-      else if (left <= orange) st = 'st-orange';
-      else if (left <= yellow) st = 'st-yellow';
-      row.title = `Due ${clock(t.due)} ${dayLabel(t.due, now)} · Double-click to complete · Right-click to change due time`;
+      cd.textContent = formatCountdown(t.due - now);
+      dueEl.textContent = dueLabel(t.due, now);
+      row.title = (flashing ? 'Click once to stop flashing · ' : '') +
+        `Due ${clock(t.due)} ${dayLabel(t.due, now)} · Double-click to complete · Right-click to change due time`;
     }
     row.classList.toggle('timed', t.due != null);
+    row.classList.toggle('flash', flashing);
     for (const c of ['st-yellow', 'st-orange', 'st-red']) row.classList.toggle(c, c === st);
   }
   checkOverdue(now);
@@ -290,7 +320,7 @@ function flyFromInput(row, ghost) {
 function addTask(text, due, ghost) {
   const id = uid();
   return transition(() => {
-    state.tasks.push({ id, text, due, flagged: false, completed: false, created: Date.now() });
+    state.tasks.push({ id, text, due, flagged: false, completed: false, created: Date.now(), ack: levelAt(due, Date.now()) });
   }, { ghost: ghost ? { ...ghost, id } : null });
 }
 function completeTask(id) {
@@ -303,7 +333,7 @@ function toggleFlag(id) {
   return transition(() => { const t = findTask(id); if (t) t.flagged = !t.flagged; });
 }
 function setDue(id, due) {
-  return transition(() => { const t = findTask(id); if (t) { t.due = due; delete t.alertedDue; } });
+  return transition(() => { const t = findTask(id); if (t) { t.due = due; delete t.alertedDue; t.ack = levelAt(due, Date.now()); } });
 }
 function clearCompleted() {
   return transition(() => { state.tasks = state.tasks.filter((t) => !t.completed); });
@@ -316,9 +346,10 @@ function loadPreset(p) {
   return transition(() => {
     p.items.forEach((it, i) => {
       const r = parseTime(it.time || '', now, { mode: 'next' });
+      const due = r.kind === 'ok' ? r.due : null;
       state.tasks.push({
-        id: uid(), text: it.text, due: r.kind === 'ok' ? r.due : null,
-        flagged: !!it.flagged, completed: false, created: now + i,
+        id: uid(), text: it.text, due,
+        flagged: !!it.flagged, completed: false, created: now + i, ack: levelAt(due, now),
       });
     });
   }, { enter: 'right' });
@@ -517,6 +548,9 @@ function openChangeDueTime(id) {
 // ---------- Settings ----------
 let settingsPanel = null;
 function applySettings() {
+  const name = (state.settings.listName || '').trim() || DEFAULT_SETTINGS.listName;
+  document.querySelector('.topbar h1').textContent = name;
+  document.title = name;
   document.documentElement.dataset.theme = state.settings.theme;
   bridge.setTheme(state.settings.theme);
   bridge.setAlwaysOnTop(state.settings.alwaysOnTop);
@@ -559,6 +593,12 @@ function openSettings() {
     themeSeg.append(b);
   }
 
+  const nameField = el('input', { class: 'text-field', type: 'text', maxlength: '60', placeholder: DEFAULT_SETTINGS.listName, 'aria-label': 'List name' });
+  nameField.value = s.listName;
+  nameField.addEventListener('input', () => setSetting('listName', nameField.value));
+  nameField.addEventListener('blur', () => {
+    if (!nameField.value.trim()) { nameField.value = DEFAULT_SETTINGS.listName; setSetting('listName', DEFAULT_SETTINGS.listName); }
+  });
   const yellowField = numberField('yellowMinutes');
   const orangeField = numberField('orangeMinutes');
   const presetList = el('div');
@@ -568,6 +608,9 @@ function openSettings() {
   const panel = el('div', { class: 'settings' },
     el('header', {}, el('h2', { text: 'Settings' }), closeBtn),
     el('div', { class: 'scroll' },
+      el('h3', { text: 'List name' }),
+      el('div', { class: 'setting' }, nameField),
+
       el('h3', { text: 'Colors' }),
       el('div', { class: 'setting' }, el('label', { text: 'Turn yellow when due within (minutes)' }), yellowField),
       el('div', { class: 'setting' }, el('label', { text: 'Turn orange when due within (minutes)' }), orangeField),

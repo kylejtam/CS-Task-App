@@ -12,11 +12,9 @@
   --accent-text: #0e1420;
   --danger: #ff6b6b;
   --flag: #ff4d4f;
-  --yellow: #f4cc4b;
-  --orange: #f7943d;
-  --red: #e5484d;
-  --on-warn: #1a1a1a;
-  --on-red: #ffffff;
+  --yellow: #b39a4c;
+  --orange: #b9784a;
+  --red: #b35a5e;
   --shadow: 0 10px 40px rgba(0, 0, 0, .5);
   color-scheme: dark;
 }
@@ -32,6 +30,9 @@
   --accent-text: #ffffff;
   --danger: #d6363b;
   --flag: #e5252a;
+  --yellow: #c4a443;
+  --orange: #c98250;
+  --red: #c2585d;
   --shadow: 0 10px 40px rgba(0, 0, 0, .18);
   color-scheme: light;
 }
@@ -48,6 +49,9 @@
     --accent-text: #ffffff;
     --danger: #d6363b;
     --flag: #e5252a;
+    --yellow: #c4a443;
+    --orange: #c98250;
+    --red: #c2585d;
     --shadow: 0 10px 40px rgba(0, 0, 0, .18);
     color-scheme: light;
   }
@@ -94,7 +98,7 @@ input { font: inherit; color: inherit; user-select: text; }
 
 .row {
   display: grid;
-  grid-template-columns: 62px 1fr 30px;
+  grid-template-columns: 70px 1fr 30px;
   align-items: center; gap: 10px;
   margin: 6px 10px; padding: 10px 8px 10px 12px;
   background: var(--row);
@@ -110,6 +114,7 @@ input { font: inherit; color: inherit; user-select: text; }
   color: var(--muted);
 }
 .row.timed .countdown { color: var(--text); }
+.due { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; margin-top: 1px; }
 .name { overflow-wrap: anywhere; }
 .flag {
   width: 28px; height: 28px; border-radius: 50%;
@@ -120,13 +125,20 @@ input { font: inherit; color: inherit; user-select: text; }
 .flag:hover { opacity: .8; background: rgba(127, 127, 127, .15); }
 .flag.on { color: var(--flag); opacity: 1; }
 
-.row.st-yellow { background: var(--yellow); border-color: var(--yellow); color: var(--on-warn); }
-.row.st-orange { background: var(--orange); border-color: var(--orange); color: var(--on-warn); }
-.row.st-red    { background: var(--red);    border-color: var(--red);    color: var(--on-red); }
-.row.st-yellow .countdown, .row.st-orange .countdown, .row.st-red .countdown { color: inherit; }
-.row.st-yellow .flag, .row.st-orange .flag, .row.st-red .flag { color: inherit; opacity: .45; }
-.row.st-yellow .flag.on, .row.st-orange .flag.on { color: #b00010; opacity: 1; }
-.row.st-red .flag.on { color: #fff; opacity: 1; }
+/* Deadline colors: shown as a border only. */
+.row.st-yellow { --state: var(--yellow); }
+.row.st-orange { --state: var(--orange); }
+.row.st-red    { --state: var(--red); }
+.row.st-yellow, .row.st-orange, .row.st-red {
+  border-color: var(--state);
+  box-shadow: inset 0 0 0 1px var(--state);
+}
+/* Flashes when a task changes color, until you click it once. */
+.row.flash { animation: flash-border 1.2s ease-in-out infinite; cursor: pointer; }
+@keyframes flash-border {
+  0%, 100% { border-color: var(--state); box-shadow: inset 0 0 0 1px var(--state), 0 0 8px var(--state); }
+  50%      { border-color: var(--border); box-shadow: inset 0 0 0 1px transparent, 0 0 0 transparent; }
+}
 
 .empty { text-align: center; color: var(--muted); margin: 48px 20px; }
 .empty[hidden] { display: none; }
@@ -202,11 +214,12 @@ input { font: inherit; color: inherit; user-select: text; }
 .dialog .hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
 .dialog .preview { margin: 8px 0 0; min-height: 20px; text-align: center; font-weight: 600; }
 .dialog .preview.bad { color: var(--danger); }
-.steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 14px; }
+.steps { display: grid; grid-template-columns: repeat(4, 1fr) 4px repeat(4, 1fr); gap: 4px; margin-top: 14px; }
+.step:nth-child(5) { grid-column: 6; }
 .step {
-  padding: 8px 0; border-radius: 8px;
+  padding: 8px 0; border-radius: 7px; min-width: 0;
   background: var(--row); border: 1px solid var(--border);
-  font-variant-numeric: tabular-nums; font-weight: 600;
+  font-variant-numeric: tabular-nums; font-weight: 600; font-size: 12px;
 }
 .step:hover { background: var(--row-hover); }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
@@ -296,4 +309,11 @@ input { font: inherit; color: inherit; user-select: text; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+  .row.flash { animation: none; outline: 2px dashed var(--state); outline-offset: 2px; }
 }
+
+.text-field {
+  flex: 1; min-width: 0; padding: 6px 9px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 7px; outline: none;
+}
+.text-field:focus { border-color: var(--accent); }

@@ -26,10 +26,15 @@ The app can take a few seconds to open, because it unpacks itself each time it s
 | Complete a task | **Double-click** the task |
 | Bring back a completed task | Open **Completed** at the bottom of the list and **right-click** the task |
 | Undo | Click the curved arrow at the top, or press **Ctrl+Z** (up to 10 steps) |
-| Settings, presets, theme | Click the gear at the top right |
+| Stop a task flashing | Click it once |
+| Rename the list, settings, presets, theme | Click the gear at the top right |
 
-**Row colors:** yellow = due within 1 hour · orange = due within 5 minutes · red = overdue.
-You can change the yellow and orange limits in Settings.
+**Row borders:** yellow = due within 1 hour · orange = due within 5 minutes · red = overdue.
+You can change the yellow and orange limits in Settings. When a task's border changes color it
+**flashes**. Click the task once to say "I've seen it" and the flashing stops (the colored border stays).
+
+**Times on each row:** the big number is the time left; the small number under it is the actual
+due time (with "tmrw" if it's due tomorrow).
 
 **Countdown:** with an hour or more left it shows hours:minutes (`2:05`). With less than an
 hour left it shows minutes:seconds (`4:30`). Once overdue it shows the time since the deadline
