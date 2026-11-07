@@ -8,4 +8,10 @@ contextBridge.exposeInMainWorld('api', {
   setAlwaysOnTop: (on) => ipcRenderer.send('set-always-on-top', on),
   setTheme: (theme) => ipcRenderer.send('set-theme', theme),
   notify: (title, body) => ipcRenderer.send('notify', { title, body }),
+  checkForUpdate: () => ipcRenderer.invoke('check-update'),
+  installUpdate: (info) => ipcRenderer.invoke('install-update', info),
+  onUpdateProgress: (fn) => {
+    ipcRenderer.removeAllListeners('update-progress');
+    ipcRenderer.on('update-progress', (_e, p) => fn(p));
+  },
 });

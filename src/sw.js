@@ -1,7 +1,7 @@
 // sw.js — lets the phone version open without internet.
 // It always tries to get the newest version first, and falls back to the saved copy when offline.
-const CACHE = 'task-timer-v1';
-const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'timeutils.js', 'manifest.webmanifest',
+const CACHE = 'task-timer-v2';
+const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'timeutils.js', 'version.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
@@ -15,7 +15,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: 'no-cache' }) // always ask the website for the newest copy
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));

@@ -20,6 +20,26 @@ const bridge = window.api || {
     } catch {}
   },
 };
+Object.assign(bridge, window.api ? {} : {
+  // Phone/web version: the newest version number is in version.js on the website.
+  async checkForUpdate() {
+    const res = await fetch('version.js?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('Website answered ' + res.status);
+    const m = (await res.text()).match(/APP_VERSION\s*=\s*'([^']+)'/);
+    if (!m) throw new Error('No version found');
+    return { version: m[1] };
+  },
+  async installUpdate() {
+    try {
+      const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+      if (reg) await reg.update();
+    } catch {}
+    location.reload();
+    return { mode: 'reloading' };
+  },
+  onUpdateProgress() {},
+});
+const { APP_VERSION, compareVersions } = window.AppVersion;
 const isDesktopApp = !!window.api;
 const isTouch = window.matchMedia('(pointer: coarse)').matches;
 if (isTouch) document.documentElement.classList.add('touch');
@@ -99,12 +119,18 @@ const undoBtn = $('undo-btn');
 
 // ---------- Sorting ----------
 // Flagged first. Within each group: soonest deadline first; no time limit at the bottom.
-function compareTasks(a, b) {
+// groupCompare is the rule you can't override by dragging.
+function groupCompare(a, b) {
   if (!!a.flagged !== !!b.flagged) return a.flagged ? -1 : 1;
   const an = a.due == null, bn = b.due == null;
   if (an !== bn) return an ? 1 : -1;
   if (!an && a.due !== b.due) return a.due - b.due;
-  return (a.created || 0) - (b.created || 0);
+  return 0;
+}
+// After that, tasks keep the order you dragged them into (new tasks go to the end).
+const orderOf = (t) => (t.order != null ? t.order : t.created || 0);
+function compareTasks(a, b) {
+  return groupCompare(a, b) || orderOf(a) - orderOf(b) || (a.created || 0) - (b.created || 0);
 }
 const activeTasks = () => state.tasks.filter((t) => !t.completed).sort(compareTasks);
 const doneTasks = () => state.tasks.filter((t) => t.completed).sort(compareTasks);
@@ -124,17 +150,17 @@ function rowEl(t, section) {
     flag);
 
   if (section === 'a') {
-    attachSwipe(row, { right: ['Complete', () => completeTask(t.id)], left: ['Change time', () => openChangeDueTime(t.id)] });
-    row.addEventListener('click', () => acknowledge(t.id));
+    attachSwipe(row, { right: ['Complete', () => completeTask(t.id)], left: ['Edit', () => openEditTask(t.id)] });
+    attachDrag(row);
+    row.addEventListener('click', () => { if (Date.now() - lastDragEnd > 300) acknowledge(t.id); });
     row.addEventListener('dblclick', () => completeTask(t.id));
-    row.addEventListener('contextmenu', (e) => { e.preventDefault(); openChangeDueTime(t.id); });
+    row.addEventListener('contextmenu', (e) => { e.preventDefault(); openEditTask(t.id); });
     flag.addEventListener('click', (e) => { e.stopPropagation(); toggleFlag(t.id); });
     flag.addEventListener('dblclick', (e) => e.stopPropagation());
   } else {
     row.classList.add('done');
     flag.tabIndex = -1;
-    row.querySelector('.countdown').textContent = t.due == null ? '—' : clock(t.due);
-    row.title = 'Right-click to move back to the active list';
+    row.title = isTouch ? 'Swipe to move back to the list' : 'Right-click to move back to the active list';
     row.addEventListener('contextmenu', (e) => { e.preventDefault(); restoreTask(t.id); });
     const back = ['Move back', () => restoreTask(t.id)];
     attachSwipe(row, { right: back, left: back });
@@ -156,6 +182,7 @@ function attachSwipe(row, actions) {
     startX = e.touches[0].clientX; startY = e.touches[0].clientY; dx = 0; phase = 'maybe';
   }, { passive: true });
   row.addEventListener('touchmove', (e) => {
+    if (drag) { phase = 'idle'; return; } // a press-and-hold drag is happening instead
     if (phase === 'idle' || phase === 'scroll') return;
     const x = e.touches[0].clientX - startX, y = e.touches[0].clientY - startY;
     if (phase === 'maybe') {
@@ -263,6 +290,15 @@ function updateTimes() {
     row.classList.toggle('flash', flashing);
     for (const c of ['st-yellow', 'st-orange', 'st-red']) row.classList.toggle(c, c === st);
   }
+  // Completed tasks show the time they were completed, for 24 hours.
+  for (const row of completedListEl.children) {
+    const t = findTask(row.dataset.id);
+    if (!t) continue;
+    const recent = t.completedAt != null && now - t.completedAt < 24 * 60 * MIN;
+    const text = recent ? clock(t.completedAt) : '';
+    const cd = row.querySelector('.countdown');
+    if (cd.textContent !== text) cd.textContent = text;
+  }
   checkOverdue(now);
 }
 
@@ -328,12 +364,14 @@ async function runTransition(mutate, opts) {
   const before = new Set(allRows().map((r) => r.dataset.key));
   const snapshot = clone(state.tasks);
   mutate();
-  if (JSON.stringify(state.tasks) === JSON.stringify(snapshot)) { render(); return; } // nothing changed
-  if (opts.undoable !== false) {
-    undoStack.push(snapshot);
-    if (undoStack.length > MAX_UNDO) undoStack.shift();
+  const changed = JSON.stringify(state.tasks) !== JSON.stringify(snapshot);
+  if (changed) {
+    if (opts.undoable !== false) {
+      undoStack.push(snapshot);
+      if (undoStack.length > MAX_UNDO) undoStack.shift();
+    }
+    save();
   }
-  save();
   const after = expectedKeys();
   const removed = allRows().filter((r) => !after.has(r.dataset.key) && isVisible(r));
   const added = new Set([...after].filter((k) => !before.has(k)));
@@ -411,8 +449,16 @@ function restoreTask(id) {
 function toggleFlag(id) {
   return transition(() => { const t = findTask(id); if (t) t.flagged = !t.flagged; });
 }
-function setDue(id, due) {
-  return transition(() => { const t = findTask(id); if (t) { t.due = due; delete t.alertedDue; t.ack = levelAt(due, Date.now()); } });
+function editTask(id, text, due) {
+  return transition(() => {
+    const t = findTask(id);
+    if (!t) return;
+    t.text = text;
+    if (t.due !== due) { t.due = due; delete t.alertedDue; t.ack = levelAt(due, Date.now()); }
+  });
+}
+function deleteTask(id) {
+  return transition(() => { state.tasks = state.tasks.filter((t) => t.id !== id); });
 }
 function clearCompleted() {
   return transition(() => { state.tasks = state.tasks.filter((t) => !t.completed); });
@@ -564,12 +610,14 @@ function openAddDialog(text) {
   update();
 }
 
-// Right-click on a task: "Change Due Time".
-function openChangeDueTime(id) {
+// Right-click (or swipe left on iPhone): rename, change the due time, or delete.
+function openEditTask(id) {
   const t = findTask(id);
   if (!t) return;
   let value = t.due; // the due time being edited
-  const field = el('input', { class: 'field', type: 'text', placeholder: 'No time limit', autocomplete: 'off', autocorrect: 'off', autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'done' });
+  const nameField = el('input', { class: 'text-input', type: 'text', 'aria-label': 'Task name', maxlength: '300', enterkeyhint: 'done' });
+  nameField.value = t.text;
+  const field = el('input', { class: 'field', type: 'text', placeholder: 'No time limit', 'aria-label': 'Due time', autocomplete: 'off', autocorrect: 'off', autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'done' });
   field.value = t.due == null ? '' : clock(t.due);
   const preview = el('p', { class: 'preview' });
   const steps = el('div', { class: 'steps' });
@@ -586,16 +634,20 @@ function openChangeDueTime(id) {
     }));
   }
   const confirmBtn = el('button', { class: 'btn primary', text: 'Confirm' });
+  const deleteBtn = el('button', { class: 'btn danger delete-btn', text: 'Delete task' });
   const content = el('div', {},
-    el('h2', { text: 'Change Due Time' }),
-    el('p', { class: 'sub', text: t.text }),
+    el('h2', { text: 'Edit Task' }),
+    el('label', { class: 'field-label', text: 'Task' }),
+    nameField,
+    el('label', { class: 'field-label', text: 'Due time' }),
     field,
     preview,
     steps,
-    el('p', { class: 'hint', text: 'Clear the box for no time limit.' }),
-    el('div', { class: 'actions center' }, confirmBtn));
+    el('p', { class: 'hint', text: 'Clear the time box for no time limit.' }),
+    el('div', { class: 'actions center' }, confirmBtn),
+    el('div', { class: 'delete-row' }, deleteBtn));
 
-  // fromTyping: re-read the box; otherwise the step buttons already set `value`.
+  // fromTyping: re-read the time box; otherwise the step buttons already set `value`.
   let bad = false;
   function update(fromTyping) {
     const now = Date.now();
@@ -613,15 +665,133 @@ function openChangeDueTime(id) {
   }
   const submit = () => {
     update(true);
-    if (bad) { shake(field); return; }
+    if (bad) { shake(field); field.focus(); return; }
+    const text = nameField.value.trim();
+    if (!text) { shake(nameField); nameField.focus(); return; }
     dlg.close('ok');
-    if (value !== t.due) setDue(id, value);
+    editTask(id, text, value);
   };
   field.addEventListener('input', () => update(true));
-  field.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
+  for (const f of [field, nameField]) {
+    f.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); submit(); } });
+  }
   confirmBtn.addEventListener('click', submit);
+  deleteBtn.addEventListener('click', () => { dlg.close('deleted'); deleteTask(id); toast('Task deleted'); });
   const dlg = openDialog(content);
+  // The cursor starts in the time box.
+  field.focus();
+  field.select();
   update(false);
+}
+
+// ---------- Drag to reorder ----------
+// Any task can be picked up, but it only stays where you drop it if that spot fits the
+// sorting rules (priority first, then by due time). Otherwise it slides back.
+let drag = null;
+let lastDragEnd = 0;
+function attachDrag(row) {
+  // Mouse: press and move.
+  row.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0 || e.target.closest('.flag') || openDialogs) return;
+    const sx = e.clientX, sy = e.clientY;
+    const move = (ev) => {
+      if (!drag && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) startDrag(row, sy);
+      if (drag) moveDrag(ev.clientY);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      if (drag) endDrag();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  });
+  // Finger: press and hold, then move.
+  let timer = null, tx = 0, ty = 0;
+  row.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || openDialogs) return;
+    tx = e.touches[0].clientX; ty = e.touches[0].clientY;
+    timer = setTimeout(() => {
+      timer = null;
+      startDrag(row, ty);
+      if (navigator.vibrate) navigator.vibrate(15);
+    }, 450);
+  }, { passive: true });
+  row.addEventListener('touchmove', (e) => {
+    const p = e.touches[0];
+    if (timer && Math.hypot(p.clientX - tx, p.clientY - ty) > 8) { clearTimeout(timer); timer = null; }
+    if (drag && drag.row === row) { e.preventDefault(); moveDrag(p.clientY); }
+  }, { passive: false });
+  const touchEnd = () => {
+    clearTimeout(timer); timer = null;
+    if (drag && drag.row === row) endDrag();
+  };
+  row.addEventListener('touchend', touchEnd);
+  row.addEventListener('touchcancel', touchEnd);
+}
+function startDrag(row, startY) {
+  if (drag || openDialogs) return;
+  const rows = [...activeEl.querySelectorAll(':scope > .row')];
+  const index = rows.indexOf(row);
+  if (index < 0) return;
+  const rects = rows.map((r) => r.getBoundingClientRect());
+  const gap = rows.length > 1 ? rects[1].top - rects[0].bottom : 6;
+  drag = {
+    row, rows, index, target: index, startY, lastY: startY,
+    centers: rects.map((r) => r.top + r.height / 2),
+    shift: rects[index].height + gap,
+    scrollStart: listEl.scrollTop, raf: 0,
+  };
+  row.classList.add('dragging');
+  for (const r of rows) if (r !== row) r.style.transition = 'transform .18s ease';
+  const autoScroll = () => {
+    if (!drag) return;
+    const l = listEl.getBoundingClientRect();
+    const edge = 48;
+    let speed = 0;
+    if (drag.lastY < l.top + edge) speed = -Math.ceil((l.top + edge - drag.lastY) / 6);
+    else if (drag.lastY > l.bottom - edge) speed = Math.ceil((drag.lastY - (l.bottom - edge)) / 6);
+    if (speed) { listEl.scrollTop += speed; moveDrag(drag.lastY); }
+    drag.raf = requestAnimationFrame(autoScroll);
+  };
+  drag.raf = requestAnimationFrame(autoScroll);
+}
+function moveDrag(y) {
+  const d = drag;
+  d.lastY = y;
+  d.dy = y - d.startY + (listEl.scrollTop - d.scrollStart);
+  d.row.style.transform = `translateY(${d.dy}px)`;
+  const center = d.centers[d.index] + d.dy;
+  let target = 0;
+  d.centers.forEach((c, i) => { if (i !== d.index && c < center) target++; });
+  d.target = target;
+  d.rows.forEach((r, i) => {
+    if (i === d.index) return;
+    const j = i < d.index ? i : i - 1; // position when the dragged task is taken out
+    let off = 0;
+    if (i < d.index && j >= target) off = d.shift;
+    if (i > d.index && j < target) off = -d.shift;
+    r.style.transform = off ? `translateY(${off}px)` : '';
+  });
+}
+function endDrag() {
+  const d = drag;
+  drag = null;
+  lastDragEnd = Date.now();
+  cancelAnimationFrame(d.raf);
+  d.row.classList.remove('dragging');
+  const ids = d.rows.map((r) => r.dataset.id);
+  const [movedId] = ids.splice(d.index, 1);
+  ids.splice(d.target, 0, movedId);
+  const t = findTask(movedId);
+  const before = d.target > 0 ? findTask(ids[d.target - 1]) : null;
+  const after = d.target < ids.length - 1 ? findTask(ids[d.target + 1]) : null;
+  const fits = t && d.target !== d.index &&
+    (!before || groupCompare(before, t) <= 0) && (!after || groupCompare(t, after) <= 0);
+  // Rows animate from wherever they are now to their final spot (back home if it didn't fit).
+  transition(() => {
+    if (fits) ids.forEach((id, i) => { const x = findTask(id); if (x) x.order = i; });
+  });
 }
 
 // ---------- Settings ----------
@@ -695,6 +865,8 @@ function openSettings() {
   const clearAllBtn = el('button', { class: 'btn danger', text: 'Clear All Tasks' });
 
   const closeBtn = el('button', { class: 'icon-btn', title: 'Close settings', 'aria-label': 'Close settings', text: '✕' });
+  const updateStatus = el('span', { class: 'update-status' });
+  const updateBtn = el('button', { class: 'btn small' });
   const panel = el('div', { class: 'settings' },
     el('header', {}, el('h2', { text: 'Settings' }), closeBtn),
     el('div', { class: 'scroll' },
@@ -731,9 +903,29 @@ function openSettings() {
 
       el('h3', { text: 'Tasks' }),
       clearAllBtn,
-      el('p', { class: 'muted', text: 'Removes every task, including completed ones. You can undo this.' })));
+      el('p', { class: 'muted', text: 'Removes every task, including completed ones. You can undo this.' }),
+
+      el('h3', { text: 'Updates' }),
+      el('div', { class: 'setting' }, updateStatus, updateBtn),
+
+      el('h3', { text: 'Help' }),
+      el('button', { class: 'btn', text: 'Show tutorial', onclick: () => { closeSettings(); openTutorial(); } })),
+    el('footer', { class: 'version', text: 'Version ' + APP_VERSION }));
 
   confirmButton(clearAllBtn, () => { closeSettings(); clearAllTasks(); toast('All tasks cleared'); });
+  panel.showUpdate = () => {
+    if (update.busy) return;
+    if (update.available) {
+      updateStatus.textContent = `Version ${update.available.version} is available.`;
+      updateBtn.textContent = 'Update now';
+    } else {
+      updateStatus.textContent = update.message || `You have version ${APP_VERSION}.`;
+      updateBtn.textContent = 'Check for updates';
+    }
+  };
+  updateBtn.addEventListener('click', () => (update.available ? askToUpdate() : checkForUpdates(true)));
+  panel.updateStatus = updateStatus;
+  panel.updateBtn = updateBtn;
   closeBtn.addEventListener('click', closeSettings);
   panel.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !openDialogs) closeSettings(); });
 
@@ -761,6 +953,7 @@ function openSettings() {
     }));
   };
   panel.renderPresets();
+  panel.showUpdate();
   document.body.append(panel);
   settingsPanel = panel;
   closeBtn.focus();
@@ -840,6 +1033,121 @@ function openPresetEditor(preset, fromCurrent) {
   nameField.focus();
 }
 
+// ---------- Updates ----------
+const update = { available: null, message: '', busy: false };
+function showUpdateState() {
+  $('settings-btn').classList.toggle('has-update', !!update.available);
+  $('settings-btn').title = update.available ? `Settings · Version ${update.available.version} is available` : 'Settings';
+  if (settingsPanel) settingsPanel.showUpdate();
+}
+function setUpdateBusy(text) {
+  update.busy = !!text;
+  if (settingsPanel) {
+    settingsPanel.updateStatus.textContent = text || '';
+    settingsPanel.updateBtn.disabled = !!text;
+    if (!text) settingsPanel.showUpdate();
+  }
+}
+// manual = you pressed the button (so say what happened). Otherwise it's the quiet check at start-up.
+async function checkForUpdates(manual) {
+  if (update.busy) return;
+  if (manual) setUpdateBusy('Checking…');
+  try {
+    const info = await bridge.checkForUpdate();
+    update.available = compareVersions(info.version, APP_VERSION) > 0 ? info : null;
+    update.message = update.available ? '' : `You have the latest version (${APP_VERSION}).`;
+  } catch (err) {
+    update.message = "Couldn't check for updates. Check your internet connection and try again.";
+    console.warn('Update check failed', err);
+  }
+  if (manual) setUpdateBusy('');
+  showUpdateState();
+  if (manual && update.available) askToUpdate();
+}
+function askToUpdate() {
+  const info = update.available;
+  if (!info) return;
+  const later = el('button', { class: 'btn', text: 'Later' });
+  const now = el('button', { class: 'btn primary', text: 'Update now' });
+  const dlg = openDialog(el('div', {},
+    el('h2', { text: 'Update available' }),
+    el('p', { class: 'sub', text: `Version ${info.version} is available. You have version ${APP_VERSION}. Update now?` }),
+    el('p', { class: 'muted', text: isDesktopApp
+      ? 'The app will download the new version, close, and reopen by itself. Your tasks are kept.'
+      : 'The app will reload with the new version. Your tasks are kept.' }),
+    el('div', { class: 'actions' }, later, now)));
+  later.addEventListener('click', () => dlg.close(null));
+  now.addEventListener('click', () => { dlg.close('ok'); installUpdate(); });
+  now.focus();
+}
+async function installUpdate() {
+  const info = update.available;
+  if (!info || update.busy) return;
+  saveNow();
+  if (!settingsPanel) openSettings();
+  setUpdateBusy('Downloading…');
+  bridge.onUpdateProgress((p) => {
+    if (update.busy && p != null) setUpdateBusy(`Downloading… ${Math.round(p * 100)}%`);
+  });
+  try {
+    const result = await bridge.installUpdate(info);
+    if (result && result.mode === 'restarting') setUpdateBusy('Restarting…');
+    else if (result && result.mode === 'opened') { setUpdateBusy(''); toast('Opened the download page'); }
+  } catch (err) {
+    console.warn('Update failed', err);
+    update.message = "The update didn't finish. Check your internet connection and try again.";
+    setUpdateBusy('');
+  }
+}
+
+// ---------- First-launch tutorial ----------
+function tutorialSteps() {
+  const t = isTouch;
+  return [
+    ['Welcome to Task Timer', 'Keep track of tasks with deadlines and countdowns. Here’s a quick tour — it takes about 30 seconds.'],
+    ['Add a task', `Type in the box at the bottom and ${t ? 'tap Return' : 'press Enter'}. Then type when it’s due: 14:30 for a clock time, +45 for 45 minutes from now, or leave it empty for no time limit.`],
+    ['Watch the colors', `Tasks turn yellow within an hour of their deadline, orange within 5 minutes, and red when overdue. When a task changes color its border flashes — ${t ? 'tap' : 'click'} it once to say you’ve seen it.`],
+    ['Complete and edit', t
+      ? 'Swipe a task right to complete it. Swipe left to rename it, change its time or delete it. Completed tasks go to the Completed section at the bottom — swipe one there to bring it back.'
+      : 'Double-click a task to complete it. Right-click to rename it, change its time or delete it. Completed tasks go to the Completed section at the bottom — right-click one there to bring it back.'],
+    ['Priority and order', `${t ? 'Tap' : 'Click'} the ! on a task to make it a priority — it jumps to the top. Tasks with no time limit can be ${t ? 'pressed and held, then dragged' : 'dragged'} into any order you like.`],
+    ['Undo and settings', `Made a mistake? The curved arrow at the top${t ? '' : ' (or Ctrl+Z)'} undoes up to 10 steps. The gear opens settings: rename the list, change the colors, save presets and check for updates.`],
+  ];
+}
+function openTutorial() {
+  const steps = tutorialSteps();
+  let i = 0;
+  const title = el('h2');
+  const body = el('p', { class: 'tutorial-body' });
+  const dots = el('div', { class: 'dots' }, ...steps.map(() => el('span')));
+  const skip = el('button', { class: 'text-btn', text: 'Skip' });
+  const back = el('button', { class: 'btn', text: 'Back' });
+  const next = el('button', { class: 'btn primary' });
+  const finish = () => { state.ui.tutorialSeen = true; save(); };
+  const dlg = openDialog(el('div', { class: 'tutorial' },
+    el('p', { class: 'step-count' }), title, body, dots,
+    el('div', { class: 'actions' }, skip, el('span', { style: 'flex:1' }), back, next)), { onClose: finish });
+  const show = () => {
+    const [h, p] = steps[i];
+    dlg.dialog.querySelector('.step-count').textContent = `${i + 1} of ${steps.length}`;
+    title.textContent = h;
+    body.textContent = p;
+    [...dots.children].forEach((d, k) => d.classList.toggle('on', k === i));
+    back.style.visibility = i ? 'visible' : 'hidden';
+    next.textContent = i === steps.length - 1 ? 'Get started' : 'Next';
+    skip.style.visibility = i === steps.length - 1 ? 'hidden' : 'visible';
+    next.focus();
+  };
+  skip.addEventListener('click', () => dlg.close('skip'));
+  back.addEventListener('click', () => { if (i > 0) { i--; show(); } });
+  next.addEventListener('click', () => { if (i < steps.length - 1) { i++; show(); } else { dlg.close('done'); input.focus(); } });
+  dlg.dialog.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') next.click();
+    if (e.key === 'ArrowLeft') back.click();
+  });
+  show();
+}
+
 // ---------- Small message at the bottom ----------
 let toastTimer = null;
 function toast(msg) {
@@ -873,12 +1181,14 @@ listEl.addEventListener('mousedown', (e) => { if (e.detail > 1) e.preventDefault
 
 if (isTouch) input.placeholder = 'Type a task and tap Return';
 $('empty').innerHTML = isTouch
-  ? 'No tasks yet.<br>Type one below and tap Return.<br><span class="muted">Swipe right to complete · swipe left to change the time</span>'
-  : 'No tasks yet.<br>Type one below and press Enter.<br><span class="muted">Double-click to complete · right-click to change the time</span>';
+  ? 'No tasks yet.<br>Type one below and tap Return.<br><span class="muted">Swipe right to complete · swipe left to edit</span>'
+  : 'No tasks yet.<br>Type one below and press Enter.<br><span class="muted">Double-click to complete · right-click to edit</span>';
 applySettings();
 render();
 setCompletedOpen(!!state.ui.completedOpen, false);
 input.focus();
+if (!state.ui.tutorialSeen) openTutorial();
+setTimeout(() => checkForUpdates(false), 4000);
 
 // iPhones only allow sound after the screen has been touched once.
 document.addEventListener('touchend', () => {

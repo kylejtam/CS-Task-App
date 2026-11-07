@@ -1,6 +1,7 @@
 # Builds the Windows app (Task-Timer.exe) on GitHub's own Windows computer
 # every time changes are pushed. The finished .exe appears on the
-# repository's "Releases" page, under "Latest build".
+# repository's "Releases" page, labelled with its version (e.g. "Task Timer 1.2.0").
+# Change the version in package.json AND src/version.js to release a new version.
 name: Build Windows app
 
 on:
@@ -47,8 +48,30 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          VERSION=$(node -p "require('./package.json').version")
+          # Remove the old-style "latest" download and any earlier build of this same version.
           gh release delete latest --cleanup-tag --yes || true
-          gh release create latest dist/Task-Timer.exe \
+          gh release delete "v$VERSION" --cleanup-tag --yes || true
+          gh release create "v$VERSION" dist/Task-Timer.exe \
             --target "${{ github.sha }}" \
-            --title "Latest build" \
-            --notes "Built from branch ${{ github.ref_name }}, commit ${{ github.sha }}. Download Task-Timer.exe below and double-click it to run."
+            --title "Task Timer $VERSION" \
+            --latest \
+            --notes "Download Task-Timer.exe below and double-click it to run. Already have Task Timer? Open Settings and press Check for updates."
+
+  # Puts the iPhone/web version online with GitHub Pages (main branch only).
+  iphone-web-app:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: src
+      - id: deploy
+        uses: actions/deploy-pages@v4

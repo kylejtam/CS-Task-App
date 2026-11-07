@@ -2,11 +2,18 @@
 // It opens the window, saves/loads your tasks to a file on your computer,
 // and shows Windows pop-up alerts. The screen itself lives in src/.
 
-const { app, BrowserWindow, ipcMain, Notification, Menu, nativeTheme, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, Menu, nativeTheme, screen, net, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
+const { buildSwapScript } = require('./update-script');
 
-app.setAppUserModelId('com.kylejtam.tasktimer');
+// Where new versions are published.
+const RELEASES_API = process.env.TASK_TIMER_UPDATE_URL || 'https://api.github.com/repos/kylejtam/CS-Task-App/releases/latest';
+const RELEASES_PAGE = 'https://github.com/kylejtam/CS-Task-App/releases/latest';
+
+// This name is what Windows shows as the source of pop-up alerts.
+app.setAppUserModelId('Task Timer');
 
 // Only allow one copy of the app to run at a time.
 if (!app.requestSingleInstanceLock()) {
@@ -111,6 +118,59 @@ if (!app.requestSingleInstanceLock()) {
     }
     // Also flash the taskbar button, in case Windows hides the pop-up.
     if (win && !win.isFocused()) win.flashFrame(true);
+  });
+
+  // ---------- Updates ----------
+  ipcMain.handle('check-update', async () => {
+    const res = await net.fetch(RELEASES_API, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Task-Timer' },
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error('GitHub answered ' + res.status);
+    const rel = await res.json();
+    const asset = (rel.assets || []).find((a) => /\.exe$/i.test(a.name));
+    return {
+      version: String(rel.tag_name || '').replace(/^v/i, ''),
+      downloadUrl: asset ? asset.browser_download_url : null,
+      pageUrl: rel.html_url || RELEASES_PAGE,
+    };
+  });
+
+  ipcMain.handle('install-update', async (e, info) => {
+    // The path of the .exe you double-clicked (set by the portable launcher).
+    const target = process.env.PORTABLE_EXECUTABLE_FILE;
+    if (process.platform !== 'win32' || !target || !info || !info.downloadUrl) {
+      await shell.openExternal((info && info.pageUrl) || RELEASES_PAGE);
+      return { mode: 'opened' };
+    }
+    const downloaded = target + '.download';
+    const res = await net.fetch(info.downloadUrl, { headers: { 'User-Agent': 'Task-Timer' } });
+    if (!res.ok || !res.body) throw new Error('Download failed: ' + res.status);
+    const total = Number(res.headers.get('content-length')) || 0;
+    const out = fs.createWriteStream(downloaded);
+    let got = 0;
+    try {
+      const reader = res.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        got += value.length;
+        if (!out.write(Buffer.from(value))) await new Promise((r) => out.once('drain', r));
+        if (total && !e.sender.isDestroyed()) e.sender.send('update-progress', got / total);
+      }
+      await new Promise((resolve, reject) => out.end((err) => (err ? reject(err) : resolve())));
+      if (total && got !== total) throw new Error('Download incomplete');
+      if (got < 1000000) throw new Error('Downloaded file is too small');
+    } catch (err) {
+      out.destroy();
+      try { fs.unlinkSync(downloaded); } catch {}
+      throw err;
+    }
+    const script = path.join(app.getPath('temp'), 'task-timer-update.cmd');
+    fs.writeFileSync(script, buildSwapScript(target, downloaded));
+    spawn('cmd.exe', ['/c', script], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    setTimeout(() => app.quit(), 400);
+    return { mode: 'restarting' };
   });
 
   app.on('second-instance', () => {
