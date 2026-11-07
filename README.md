@@ -7,7 +7,7 @@ It's a single `.exe` file. There's nothing to install: put it anywhere and doubl
 
 1. Open this repository on GitHub and click **Releases** on the right-hand side.
 2. Open the newest **Task Timer** release and click **Task-Timer.exe** to download it.
-   (Direct link: https://github.com/kylejtam/CS-Task-App/releases/latest)
+   (Direct link: https://github.com/kylejtam/Task-Timer/releases/latest)
 3. Put the file wherever you like (Desktop, Documents, a USB stick) and double-click it.
 
 The first time you run it, Windows may show a blue box saying **"Windows protected your PC"**.
@@ -25,7 +25,7 @@ On Windows, choosing **Update now** downloads the new version, closes the app an
 ## iPhone version
 
 The same app also runs on iPhone as a **Home Screen web app**: open
-**https://kylejtam.github.io/CS-Task-App/** in **Safari**,
+**https://kylejtam.github.io/Task-Timer/** in **Safari**,
 tap the **Share** button (square with an arrow), then **Add to Home Screen**. It then has its own
 icon, opens full-screen, works without internet, and keeps your tasks on your phone.
 

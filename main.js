@@ -9,8 +9,8 @@ const { spawn } = require('child_process');
 const { buildSwapScript } = require('./update-script');
 
 // Where new versions are published.
-const RELEASES_API = process.env.TASK_TIMER_UPDATE_URL || 'https://api.github.com/repos/kylejtam/CS-Task-App/releases/latest';
-const RELEASES_PAGE = 'https://github.com/kylejtam/CS-Task-App/releases/latest';
+const RELEASES_API = process.env.TASK_TIMER_UPDATE_URL || 'https://api.github.com/repos/kylejtam/Task-Timer/releases/latest';
+const RELEASES_PAGE = 'https://github.com/kylejtam/Task-Timer/releases/latest';
 
 // This name is what Windows shows as the source of pop-up alerts.
 app.setAppUserModelId('Task Timer');

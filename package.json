@@ -1,7 +1,7 @@
 {
   "name": "task-timer",
   "productName": "Task Timer",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Task list with deadlines and countdown timers for crew scheduling.",
   "main": "main.js",
   "author": "Kyle Tam",
