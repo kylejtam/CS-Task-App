@@ -1,46 +1,17 @@
 {
   "name": "task-timer",
   "productName": "Task Timer",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Task list with deadlines and countdown timers for crew scheduling.",
-  "main": "main.js",
   "author": "Kyle Tam",
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
-    "start": "electron .",
+    "start": "tauri dev",
     "test": "node --test test/timeutils.test.js test/version.test.js",
-    "build": "electron-builder --win portable --publish never"
-  },
-  "build": {
-    "appId": "com.kylejtam.tasktimer",
-    "productName": "Task Timer",
-    "files": [
-      "main.js",
-      "preload.js",
-      "update-script.js",
-      "src/**/*"
-    ],
-    "directories": {
-      "output": "dist"
-    },
-    "win": {
-      "target": [
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "build/icon.png"
-    },
-    "portable": {
-      "artifactName": "Task-Timer.exe"
-    }
+    "build": "tauri build --no-bundle"
   },
   "devDependencies": {
-    "electron": "^33.2.1",
-    "electron-builder": "^25.1.8"
+    "@tauri-apps/cli": "^2.12.4"
   }
 }

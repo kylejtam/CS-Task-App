@@ -14,7 +14,9 @@ The first time you run it, Windows may show a blue box saying **"Windows protect
 This happens because the app isn't "signed" (signing is a paid certificate that companies buy).
 Click **More info**, then **Run anyway**. You only need to do this once.
 
-The app can take a few seconds to open, because it unpacks itself each time it starts.
+The download is about 4 MB. It uses the Microsoft Edge engine that's already part of Windows 10 and 11
+(called "WebView2"), so there's nothing else to install. On the rare PC that doesn't have it, Windows will
+offer to download it from Microsoft.
 
 ## Updating
 
@@ -74,6 +76,8 @@ move or replace the `.exe`.
 
 ## For whoever maintains this
 
-* `src/` is the screen (HTML, CSS and JavaScript). `main.js` opens the window and saves files. `preload.js` connects the two.
-* `npm install` then `npm start` runs it on your own computer. `npm test` runs the time-format checks.
+* `src/` is the screen (HTML, CSS and JavaScript), shared by the Windows and iPhone versions.
+* `src-tauri/` is the Windows wrapper (built with [Tauri](https://tauri.app)): `src/main.rs` opens the window,
+  saves files, shows pop-ups and installs updates. `src/tauri-bridge.js` connects the screen to it.
+* `npm install` then `npm start` runs it on your own computer (needs Rust). `npm test` runs the checks.
 * Every push to GitHub builds a new `.exe` on a Windows machine (`.github/workflows/build.yml`) and puts it on the Releases page.

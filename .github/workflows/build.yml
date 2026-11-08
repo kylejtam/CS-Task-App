@@ -1,7 +1,9 @@
 # Builds the Windows app (Task-Timer.exe) on GitHub's own Windows computer
 # every time changes are pushed. The finished .exe appears on the
 # repository's "Releases" page, labelled with its version (e.g. "Task Timer 1.2.0").
-# Change the version in package.json AND src/version.js to release a new version.
+# To release a new version, change the version number in all four places:
+# package.json, src/version.js, src-tauri/tauri.conf.json and src-tauri/Cargo.toml
+# (npm test checks that they match).
 name: Build Windows app
 
 on:
@@ -26,6 +28,11 @@ jobs:
           node-version: 20
           cache: npm
 
+      # Re-use the compiled Rust pieces from earlier builds (makes builds much faster).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
       - name: Install tools
         run: npm ci
 
@@ -34,8 +41,13 @@ jobs:
 
       - name: Build the .exe
         run: npm run build
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Name the .exe
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp src-tauri/target/release/task-timer.exe dist/Task-Timer.exe
+          ls -la dist
 
       - name: Keep a copy with this run
         uses: actions/upload-artifact@v4

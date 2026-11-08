@@ -1,7 +1,7 @@
 // sw.js — lets the phone version open without internet.
 // It always tries to get the newest version first, and falls back to the saved copy when offline.
-const CACHE = 'task-timer-v2';
-const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'timeutils.js', 'version.js', 'manifest.webmanifest',
+const CACHE = 'task-timer-v3';
+const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'timeutils.js', 'version.js', 'tauri-bridge.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {

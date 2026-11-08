@@ -1,6 +1,6 @@
 // version.js — the app's version number. Change this (and package.json) when releasing a new version.
 (function (root) {
-  const APP_VERSION = '1.2.1';
+  const APP_VERSION = '1.3.0';
 
   // Compares two versions like "1.2.0" and "1.10.1". Returns 1 if a is newer, -1 if older, 0 if equal.
   function compareVersions(a, b) {
